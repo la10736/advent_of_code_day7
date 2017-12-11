@@ -12,7 +12,15 @@ fn main() {
     let content = read_all(fname);
 
     let programs = programs(&content);
-    println!("Root = {:?}", root(&programs));
+    println!("Root = {:?}", root(&programs.values().collect::<Vec<_>>()));
+
+    let mut cache = HashMap::new();
+    let wrong = programs.keys()
+        .filter_map(|n| unbalanced(&programs, n, &mut cache))
+        .nth(0).unwrap();
+
+    println!("Wrong node = {:?}", wrong);
+
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -44,28 +52,60 @@ impl<'a> From<&'a str> for Program {
 
 use std::collections::HashMap;
 
-fn parents<'a>(programs: &'a Vec<Program>) -> HashMap<&'a str, &'a Program> {
-    programs.iter().flat_map(|p|
+fn parents<'a, V: AsRef<[&'a Program]>>(programs: V) -> HashMap<&'a str, &'a Program> {
+    programs.as_ref().iter().flat_map(|p|
         p.above.iter().map(|s| s.as_ref())
-            .zip(std::iter::once(p).cycle())
+            .zip(std::iter::once(*p).cycle())
     ).collect()
 }
 
-fn programs<S: AsRef<str>>(data: S) -> Vec<Program> {
+fn programs<S: AsRef<str>>(data: S) -> HashMap<String, Program> {
     data.as_ref()
         .lines()
-        .map(|l| l.into())
+        .map(|l| {
+            let p: Program = l.into();
+            (p.name.to_string(), p)
+        })
         .collect()
 }
 
-fn root(programs: &Vec<Program>) -> &Program {
-    let map = parents(&programs);
+fn root<'a, V: AsRef<[&'a Program]>>(programs: V) -> &'a Program {
+    let map = parents(&programs.as_ref());
 
     let mut program = map.values().nth(0).unwrap();
     while let Some(parent) = map.get(program.name.as_str()) {
         program = parent;
     }
     program
+}
+
+fn compute_weight<'a>(programs: &'a HashMap<String, Program>, pname: &'a str, cache: &mut HashMap<&'a str, u32>) -> Option<u32> {
+    let p = programs.get(pname)?;
+
+    if let Some(&w) = cache.get(pname) {
+        return Some(w)
+    };
+    let v = p.weight + p.above.iter().map(|n| compute_weight(programs, n.as_str(), cache).unwrap()).sum::<u32>();
+    cache.insert(pname, v);
+    Some(v)
+}
+
+fn unbalanced<'a>(programs: &'a HashMap<String, Program>, pname: &'a str, cache: &mut HashMap<&'a str, u32>)
+    -> Option<(String, u32)> {
+    let p = programs.get(pname).unwrap();
+    let mut m = HashMap::new();
+
+    for (name, w) in p.above
+        .iter()
+        .map(|n|
+            (n, compute_weight(programs, n, cache))
+        ) {
+        m.entry(w).or_insert(vec![]).push(name);
+    }
+    let expected = m.keys().filter(|w| m[w].len() > 1).nth(0);
+    m.values().filter(|names| names.len() == 1).nth(0).map(|names|
+                                                               (names[0].clone(), expected.unwrap().unwrap())
+    )
 }
 
 #[cfg(test)]
@@ -101,7 +141,8 @@ mod test {
 
     #[test]
     fn parents_map() {
-        let programs = programs(DATA);
+        let pp = programs(DATA);
+        let programs = pp.values().collect::<Vec<_>>();
 
         let map = parents(&programs);
 
@@ -111,8 +152,34 @@ mod test {
 
     #[test]
     fn find_root() {
-        let programs = programs(DATA);
+        let pp = programs(DATA);
+        let programs = pp.values().collect::<Vec<_>>();
 
         assert_eq!(root(&programs).name, "tknk");
     }
+
+    #[test]
+    fn compute_weight_should_sum_childs() {
+        let programs = programs(DATA);
+
+        let mut cache = HashMap::new();
+
+        assert_eq!(Some(251), compute_weight(&programs, "ugml", &mut cache));
+        assert_eq!(None, compute_weight(&programs, "invalid", &mut cache));
+        assert_eq!(Some(243), compute_weight(&programs, "padx", &mut cache));
+    }
+
+
+    #[test]
+    fn unbalanced_should_return_the_unbalanced_disk_if_any() {
+        let programs = programs(DATA);
+
+        let mut cache = HashMap::new();
+
+        assert_eq!(None, unbalanced(&programs, "ugml", &mut cache));
+        assert_eq!(None, unbalanced(&programs, "padx", &mut cache));
+        assert_eq!(None, unbalanced(&programs, "cntj", &mut cache));
+        assert_eq!(Some(("ugml".to_string(), 243)), unbalanced(&programs, "tknk", &mut cache));
+    }
+
 }
