@@ -20,7 +20,6 @@ fn main() {
         .nth(0).unwrap();
 
     println!("Wrong node = {:?}", wrong);
-
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -83,7 +82,7 @@ fn compute_weight<'a>(programs: &'a HashMap<String, Program>, pname: &'a str, ca
     let p = programs.get(pname)?;
 
     if let Some(&w) = cache.get(pname) {
-        return Some(w)
+        return Some(w);
     };
     let v = p.weight + p.above.iter().map(|n| compute_weight(programs, n.as_str(), cache).unwrap()).sum::<u32>();
     cache.insert(pname, v);
@@ -91,21 +90,28 @@ fn compute_weight<'a>(programs: &'a HashMap<String, Program>, pname: &'a str, ca
 }
 
 fn unbalanced<'a>(programs: &'a HashMap<String, Program>, pname: &'a str, cache: &mut HashMap<&'a str, u32>)
-    -> Option<(String, u32)> {
+                  -> Option<(String, u32)> {
     let p = programs.get(pname).unwrap();
     let mut m = HashMap::new();
 
     for (name, w) in p.above
         .iter()
-        .map(|n|
-            (n, compute_weight(programs, n, cache))
+        .filter_map(|n|
+            compute_weight(programs, n, cache).map(|w| (n, w))
         ) {
         m.entry(w).or_insert(vec![]).push(name);
     }
-    let expected = m.keys().filter(|w| m[w].len() > 1).nth(0);
-    m.values().filter(|names| names.len() == 1).nth(0).map(|names|
-                                                               (names[0].clone(), expected.unwrap().unwrap())
-    )
+    if m.len() > 1 {
+        let (name, w) = m.iter()
+            .filter_map(|(&w, n)|
+                if n.len() == 1 { Some((n[0].to_string(), w)) } else { None })
+            .nth(0).unwrap();
+        let other = m.keys().filter(|&k| *k != w).nth(0).unwrap();
+        let corrected = programs[name.as_str()].weight + other - w;
+        Some((name, corrected))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -179,7 +185,6 @@ mod test {
         assert_eq!(None, unbalanced(&programs, "ugml", &mut cache));
         assert_eq!(None, unbalanced(&programs, "padx", &mut cache));
         assert_eq!(None, unbalanced(&programs, "cntj", &mut cache));
-        assert_eq!(Some(("ugml".to_string(), 243)), unbalanced(&programs, "tknk", &mut cache));
+        assert_eq!(Some(("ugml".to_string(), 60)), unbalanced(&programs, "tknk", &mut cache));
     }
-
 }
